@@ -1,8 +1,7 @@
 'use client'
 
-import { WavRecorder, WavStreamPlayer } from '../lib/wavtools/index.js';
+import { WavRecorder, WavStreamPlayer, WavRenderer } from '../lib/wavtools/index.js';
 import { instructions } from '../utils/conversation_config.js';
-import { WavRenderer } from '../utils/wav_renderer';
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
