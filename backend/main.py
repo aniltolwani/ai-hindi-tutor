@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import datetime, timedelta
@@ -6,6 +6,8 @@ import json
 from typing import List, Optional
 import os
 from dotenv import load_dotenv
+import websockets
+import asyncio
 
 load_dotenv()
 
@@ -14,7 +16,7 @@ app = FastAPI()
 # Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # Vite's default port
+    allow_origins=["http://localhost:5173", "http://localhost:3000"],  # Vite's default port and React's default port
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -60,6 +62,63 @@ except FileNotFoundError:
             difficulty=0.1,
         ),
     ]
+
+# WebSocket connection manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+manager = ConnectionManager()
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    openai_ws = None
+    
+    try:
+        # Connect to OpenAI
+        openai_url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01"
+        headers = {
+            "Authorization": f"Bearer {os.getenv('OPENAI_API_KEY')}",
+            "OpenAI-Beta": "realtime=v1"
+        }
+        
+        async with websockets.connect(openai_url, extra_headers=headers) as openai_ws:
+            # Handle bidirectional communication
+            async def forward_to_client():
+                try:
+                    while True:
+                        message = await openai_ws.recv()
+                        await websocket.send_text(message)
+                except websockets.exceptions.ConnectionClosed:
+                    pass
+
+            async def forward_to_openai():
+                try:
+                    while True:
+                        message = await websocket.receive_text()
+                        await openai_ws.send(message)
+                except websockets.exceptions.ConnectionClosed:
+                    pass
+
+            # Run both forwarding tasks concurrently
+            await asyncio.gather(
+                forward_to_client(),
+                forward_to_openai()
+            )
+    except Exception as e:
+        print(f"Error in websocket connection: {str(e)}")
+    finally:
+        manager.disconnect(websocket)
+        if openai_ws and not openai_ws.closed:
+            await openai_ws.close()
 
 @app.get("/phrases/due")
 async def get_due_phrases() -> List[Phrase]:
