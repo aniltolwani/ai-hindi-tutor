@@ -1,12 +1,12 @@
 'use client'
 
-import { WavRecorder, WavStreamPlayer, WavRenderer } from '../lib/wavtools/index.js';
-import { instructions } from '../utils/conversation_config.js';
+import { WavRecorder, WavStreamPlayer } from '../lib/wavtools/index.js';
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Mic } from 'lucide-react'
 import { RealtimeClient } from '@openai/realtime-api-beta';
+import { WavRenderer } from '@/lib/wavtools/wav_renderer.js';
 
 const LOCAL_RELAY_SERVER_URL: string = process.env.REACT_APP_LOCAL_RELAY_SERVER_URL || '';
 
@@ -24,6 +24,23 @@ interface ConversationItem {
     };
   };
 }
+
+const PHRASES = [
+  {
+    id: 1,
+    hindi: 'नमस्ते',
+    english: 'Hello',
+    context: 'Greeting',
+    difficulty: 0.1,
+  },
+  {
+    id: 2,
+    hindi: 'धन्यवाद',
+    english: 'Thank you',
+    context: 'Gratitude',
+    difficulty: 0.1,
+  },
+]
 
 export default function AiHindiTutor() {
   // API key handling
@@ -87,7 +104,8 @@ export default function AiHindiTutor() {
     client.sendUserMessageContent([
       {
         type: 'input_text',
-        text: 'Hello! I want to learn Hindi. Please help me practice these phrases.',
+        text: `Hello! I want to learn Hindi. Please help me practice these phrases:
+${PHRASES.map(phrase => `- ${phrase.hindi} (${phrase.english}) - ${phrase.context}`).join('\n')}`,
       },
     ]);
 
