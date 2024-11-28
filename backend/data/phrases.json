@@ -1,0 +1,72 @@
+[
+  {
+    "id": 1,
+    "hindi": "नमस्ते",
+    "english": "Hello",
+    "context": "Greeting",
+    "difficulty": 0.1
+  },
+  {
+    "id": 2,
+    "hindi": "धन्यवाद",
+    "english": "Thank you",
+    "context": "Gratitude",
+    "difficulty": 0.1
+  },
+  {
+    "id": 3,
+    "hindi": "मैं सीख रहा हूं",
+    "english": "I am learning",
+    "context": "Learning",
+    "difficulty": 0.2
+  },
+  {
+    "id": 4,
+    "hindi": "क्या आप हिंदी बोलते हैं?",
+    "english": "Do you speak Hindi?",
+    "context": "Language",
+    "difficulty": 0.3
+  },
+  {
+    "id": 5,
+    "hindi": "मुझे समझ में नहीं आया",
+    "english": "I didn't understand",
+    "context": "Clarification",
+    "difficulty": 0.3
+  },
+  {
+    "id": 6,
+    "hindi": "फिर से बोलिए",
+    "english": "Please say that again",
+    "context": "Clarification",
+    "difficulty": 0.2
+  },
+  {
+    "id": 7,
+    "hindi": "आपका नाम क्या है?",
+    "english": "What is your name?",
+    "context": "Introduction",
+    "difficulty": 0.3
+  },
+  {
+    "id": 8,
+    "hindi": "मेरा नाम ... है",
+    "english": "My name is ...",
+    "context": "Introduction",
+    "difficulty": 0.2
+  },
+  {
+    "id": 9,
+    "hindi": "आप कैसे हैं?",
+    "english": "How are you?",
+    "context": "Greeting",
+    "difficulty": 0.2
+  },
+  {
+    "id": 10,
+    "hindi": "मैं ठीक हूं",
+    "english": "I am fine",
+    "context": "Greeting",
+    "difficulty": 0.2
+  }
+]
