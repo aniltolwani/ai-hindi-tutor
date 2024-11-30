@@ -8,6 +8,7 @@ import os
 from dotenv import load_dotenv
 import websockets
 import asyncio
+import random
 
 load_dotenv()
 
@@ -169,6 +170,42 @@ async def get_stats():
         "mastered_phrases": mastered_phrases,
         "average_mastery": average_mastery,
     }
+
+@app.get("/daily_phrases")
+async def get_daily_phrases():
+    # For now, return 10 random phrases
+    daily_phrases = random.sample(phrases, min(10, len(phrases)))
+    return {"phrases": daily_phrases}
+
+@app.post("/phrase_response")
+async def handle_phrase_response(phrase_id: int, was_correct: bool):
+    phrase = next((p for p in phrases if p.id == phrase_id), None)
+    if not phrase:
+        raise HTTPException(status_code=404, detail="Phrase not found")
+    
+    # Update phrase mastery and schedule
+    if was_correct:
+        phrase.mastery_level = min(1.0, phrase.mastery_level + 0.1)
+        phrase.repetition_index = min(len(INTERVALS) - 1, phrase.repetition_index + 1)
+    else:
+        phrase.mastery_level = max(0.0, phrase.mastery_level - 0.1)
+        phrase.repetition_index = max(0, phrase.repetition_index - 1)
+    
+    # Set next review date
+    phrase.last_reviewed = datetime.now()
+    days_until_next = INTERVALS[phrase.repetition_index]
+    phrase.next_review = datetime.now() + timedelta(days=days_until_next)
+    
+    return {"status": "success", "next_review": phrase.next_review}
+
+@app.get("/system_prompt")
+async def get_system_prompt():
+    try:
+        with open("data/system_prompt.txt", "r") as f:
+            system_prompt = f.read()
+        return {"system_prompt": system_prompt}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="System prompt file not found")
 
 if __name__ == "__main__":
     import uvicorn
