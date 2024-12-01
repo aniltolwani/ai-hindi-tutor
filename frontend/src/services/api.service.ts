@@ -29,11 +29,17 @@ export const apiService = {
 
   async submitPhraseResponse(phraseId: number, wasCorrect: boolean): Promise<boolean> {
     try {
-      await fetch(`${CONFIG.BACKEND_URL}/phrase_response`, {
+      console.log(`Sending review for phrase ${phraseId} with correct=${wasCorrect}`);
+      const response = await fetch(`${CONFIG.BACKEND_URL}/phrases/${phraseId}/review`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phrase_id: phraseId, was_correct: wasCorrect }),
+        body: JSON.stringify({ correct: wasCorrect }),
       });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(`HTTP error! status: ${response.status}, details: ${JSON.stringify(errorData)}`);
+      }
       return true;
     } catch (error) {
       console.error('Error updating phrase response:', error);

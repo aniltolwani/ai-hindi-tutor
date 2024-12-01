@@ -24,5 +24,4 @@ export interface SessionState {
   isConnected: boolean;
   isRecording: boolean;
   sessionActive: boolean;
-  currentPhraseIndex: number;
 }

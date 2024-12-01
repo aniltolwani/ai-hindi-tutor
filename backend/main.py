@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 import websockets
 import asyncio
 import random
+from db import supabase
 
 load_dotenv()
 
@@ -17,7 +18,7 @@ app = FastAPI()
 # Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],  # Vite's default port and React's default port
+    allow_origins=["http://localhost:5173", "http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -37,166 +38,135 @@ class Phrase(BaseModel):
     repetition_index: int = 0
     mastery_level: float = 0.0
 
-# In-memory storage for MVP (replace with database later)
-phrases = []
+class PhraseReview(BaseModel):
+    correct: bool
 
-# Load initial phrases
-try:
-    with open("data/phrases.json", "r", encoding="utf-8") as f:
-        phrases_data = json.load(f)
-        phrases = [Phrase(**phrase) for phrase in phrases_data]
-except FileNotFoundError:
-    # Initialize with some basic phrases if file doesn't exist
-    phrases = [
-        Phrase(
-            id=1,
-            hindi="नमस्ते",
-            english="Hello",
-            context="Greeting",
-            difficulty=0.1,
-        ),
-        Phrase(
-            id=2,
-            hindi="धन्यवाद",
-            english="Thank you",
-            context="Gratitude",
-            difficulty=0.1,
-        ),
-    ]
-
-# WebSocket connection manager
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: List[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-
-manager = ConnectionManager()
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
-    openai_ws = None
+@app.get("/phrases/due", response_model=List[Phrase])
+async def get_due_phrases(limit: int = 10):
+    # Get overdue phrases first
+    now = datetime.utcnow()
+    overdue = supabase.table("phrases") \
+        .select("*") \
+        .lte("next_review", now.isoformat()) \
+        .order("next_review") \
+        .limit(limit) \
+        .execute()
     
-    try:
-        # Connect to OpenAI
-        openai_url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01"
-        headers = {
-            "Authorization": f"Bearer {os.getenv('OPENAI_API_KEY')}",
-            "OpenAI-Beta": "realtime=v1"
-        }
+    phrases = [Phrase(**p) for p in overdue.data]
+    
+    # If we need more phrases, get new ones based on difficulty
+    if len(phrases) < limit:
+        remaining = limit - len(phrases)
+        new_phrases = supabase.table("phrases") \
+            .select("*") \
+            .filter("next_review", "is", "null") \
+            .order("difficulty") \
+            .limit(remaining) \
+            .execute()
         
-        async with websockets.connect(openai_url, extra_headers=headers) as openai_ws:
-            # Handle bidirectional communication
-            async def forward_to_client():
-                try:
-                    while True:
-                        message = await openai_ws.recv()
-                        await websocket.send_text(message)
-                except websockets.exceptions.ConnectionClosed:
-                    pass
-
-            async def forward_to_openai():
-                try:
-                    while True:
-                        message = await websocket.receive_text()
-                        await openai_ws.send(message)
-                except websockets.exceptions.ConnectionClosed:
-                    pass
-
-            # Run both forwarding tasks concurrently
-            await asyncio.gather(
-                forward_to_client(),
-                forward_to_openai()
-            )
-    except Exception as e:
-        print(f"Error in websocket connection: {str(e)}")
-    finally:
-        manager.disconnect(websocket)
-        if openai_ws and not openai_ws.closed:
-            await openai_ws.close()
-
-@app.get("/phrases/due")
-async def get_due_phrases() -> List[Phrase]:
-    """Get phrases that are due for review based on spaced repetition."""
-    now = datetime.now()
-    due_phrases = [
-        phrase for phrase in phrases
-        if not phrase.next_review or phrase.next_review <= now
-    ]
-    return due_phrases
+        phrases.extend([Phrase(**p) for p in new_phrases.data])
+    
+    return phrases
 
 @app.post("/phrases/{phrase_id}/review")
-async def review_phrase(phrase_id: int, correct: bool):
-    """Update phrase after review, adjusting the spaced repetition schedule."""
-    phrase = next((p for p in phrases if p.id == phrase_id), None)
-    if not phrase:
-        raise HTTPException(status_code=404, detail="Phrase not found")
-
-    now = datetime.now()
+async def review_phrase(phrase_id: int, review: PhraseReview):
+    # Get current phrase data
+    result = supabase.table("phrases") \
+        .select("*") \
+        .eq("id", phrase_id) \
+        .execute()
     
-    # Update mastery level
-    if correct:
-        # Move to next interval if correct
-        if phrase.repetition_index < len(INTERVALS) - 1:
-            phrase.repetition_index += 1
-        phrase.mastery_level = min(1.0, phrase.mastery_level + 0.1)
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Phrase not found")
+    
+    phrase = result.data[0]
+    now = datetime.utcnow()
+    
+    # Update spaced repetition data
+    if review.correct:
+        next_interval = INTERVALS[min(phrase["repetition_index"] + 1, len(INTERVALS) - 1)]
+        mastery_increase = 0.1 * (1.0 - phrase["mastery_level"])  # Diminishing returns
+        new_mastery = min(1.0, phrase["mastery_level"] + mastery_increase)
+        rep_index = min(phrase["repetition_index"] + 1, len(INTERVALS) - 1)
     else:
-        # Reset interval if incorrect
-        phrase.repetition_index = max(0, phrase.repetition_index - 1)
-        phrase.mastery_level = max(0.0, phrase.mastery_level - 0.1)
+        next_interval = INTERVALS[0]  # Reset to first interval
+        mastery_decrease = 0.2 * phrase["mastery_level"]  # Larger penalty for mistakes
+        new_mastery = max(0.0, phrase["mastery_level"] - mastery_decrease)
+        rep_index = 0
+    
+    next_review = now + timedelta(days=next_interval)
+    
+    # Update phrase in database
+    supabase.table("phrases") \
+        .update({
+            "last_reviewed": now.isoformat(),
+            "next_review": next_review.isoformat(),
+            "repetition_index": rep_index,
+            "mastery_level": new_mastery
+        }) \
+        .eq("id", phrase_id) \
+        .execute()
+    
+    return {"status": "success"}
 
-    # Schedule next review
-    days = INTERVALS[phrase.repetition_index]
-    phrase.last_reviewed = now
-    phrase.next_review = now + timedelta(days=days)
-
-    return phrase
-
-@app.get("/phrases/stats")
-async def get_stats():
-    """Get learning statistics."""
-    total_phrases = len(phrases)
-    mastered_phrases = sum(1 for p in phrases if p.mastery_level >= 0.8)
-    average_mastery = sum(p.mastery_level for p in phrases) / total_phrases if total_phrases > 0 else 0
-
-    return {
-        "total_phrases": total_phrases,
-        "mastered_phrases": mastered_phrases,
-        "average_mastery": average_mastery,
-    }
 
 @app.get("/daily_phrases")
-async def get_daily_phrases():
-    # For now, return 10 random phrases
-    daily_phrases = random.sample(phrases, min(10, len(phrases)))
-    return {"phrases": daily_phrases}
+async def get_daily_phrases(limit: int = 10):
+    now = datetime.utcnow().isoformat()
+    
+    # 1. First get all overdue cards (where next_review is in the past)
+    overdue = supabase.table("phrases") \
+        .select("*") \
+        .lte("next_review", now) \
+        .filter("next_review", "not.is", "null") \
+        .order("next_review") \
+        .execute()
+    
+    phrases = [Phrase(**p) for p in overdue.data]
+    
+    # 2. If we need more cards, get new ones that haven't been reviewed yet
+    if len(phrases) < limit:
+        remaining = limit - len(phrases)
+        new_cards = supabase.table("phrases") \
+            .select("*") \
+            .filter("next_review", "is", "null") \
+            .order("difficulty") \
+            .limit(remaining) \
+            .execute()
+        
+        phrases.extend([Phrase(**p) for p in new_cards.data])
+    
+    return {"phrases": phrases[:limit]}
 
 @app.post("/phrase_response")
 async def handle_phrase_response(phrase_id: int, was_correct: bool):
-    phrase = next((p for p in phrases if p.id == phrase_id), None)
-    if not phrase:
-        raise HTTPException(status_code=404, detail="Phrase not found")
+    phrase = supabase.table("phrases").select("*").eq("id", phrase_id).execute().data[0]
     
     # Update phrase mastery and schedule
     if was_correct:
-        phrase.mastery_level = min(1.0, phrase.mastery_level + 0.1)
-        phrase.repetition_index = min(len(INTERVALS) - 1, phrase.repetition_index + 1)
+        phrase["mastery_level"] = min(1.0, phrase["mastery_level"] + 0.1)
+        phrase["repetition_index"] = min(len(INTERVALS) - 1, phrase["repetition_index"] + 1)
     else:
-        phrase.mastery_level = max(0.0, phrase.mastery_level - 0.1)
-        phrase.repetition_index = max(0, phrase.repetition_index - 1)
+        phrase["mastery_level"] = max(0.0, phrase["mastery_level"] - 0.1)
+        phrase["repetition_index"] = max(0, phrase["repetition_index"] - 1)
     
     # Set next review date
-    phrase.last_reviewed = datetime.now()
-    days_until_next = INTERVALS[phrase.repetition_index]
-    phrase.next_review = datetime.now() + timedelta(days=days_until_next)
+    phrase["last_reviewed"] = datetime.utcnow().isoformat()
+    days_until_next = INTERVALS[phrase["repetition_index"]]
+    phrase["next_review"] = (datetime.utcnow() + timedelta(days=days_until_next)).isoformat()
     
-    return {"status": "success", "next_review": phrase.next_review}
+    # Update phrase in database
+    supabase.table("phrases") \
+        .update({
+            "last_reviewed": phrase["last_reviewed"],
+            "next_review": phrase["next_review"],
+            "repetition_index": phrase["repetition_index"],
+            "mastery_level": phrase["mastery_level"]
+        }) \
+        .eq("id", phrase_id) \
+        .execute()
+    
+    return {"status": "success", "next_review": phrase["next_review"]}
 
 @app.get("/system_prompt")
 async def get_system_prompt():

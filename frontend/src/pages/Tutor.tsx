@@ -8,7 +8,8 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Mic } from 'lucide-react'
 import { CONFIG } from '../config/constants';
 import { apiService } from '../services/api.service';
-import { ConversationItem, SessionState } from '../types';
+import { ConversationItem, SessionState} from '../types';
+import { phraseManager } from '@/services/phraseManager.js';
 
 export default function AiHindiTutor(): JSX.Element {
   // Core state
@@ -16,32 +17,18 @@ export default function AiHindiTutor(): JSX.Element {
     isConnected: false,
     isRecording: false,
     sessionActive: false,
-    currentPhraseIndex: -1
   });
 
   const [items, setItems] = useState<ConversationItem[]>([]);
 
   // Core refs for audio and communication
   const refs = {
-    // openAI realtime client through our relay
-    client: useRef<RealtimeClient>(
-      new RealtimeClient(CONFIG.RELAY_SERVER_URL
-        ? { url: CONFIG.RELAY_SERVER_URL }
-        : { 
-            apiKey: apiService.getApiKey(), 
-            dangerouslyAllowAPIKeyInBrowser: true 
-          }
-    )),
-    // audio recorder using WavqRecorder. This will work in browser, and lets us speak
-    recorder: useRef<WavRecorder>(new WavRecorder({ 
-      sampleRate: CONFIG.SAMPLE_RATE,
-    })),
-    // audio player using WavStreamPlayer. This will play audio from the server
-    player: useRef<WavStreamPlayer>(
-      new WavStreamPlayer({ sampleRate: CONFIG.SAMPLE_RATE })
-    ),
+    client: useRef<RealtimeClient | null>(null),
+    recorder: useRef<WavRecorder | null>(null),
+    player: useRef<WavStreamPlayer | null>(null),
+    toolAdded: useRef<boolean>(false),
     clientCanvas: useRef<HTMLCanvasElement | null>(null),
-    serverCanvas: useRef<HTMLCanvasElement | null>(null)
+    serverCanvas: useRef<HTMLCanvasElement | null>(null),
   };
 
 
@@ -49,7 +36,7 @@ export default function AiHindiTutor(): JSX.Element {
     const { client, player } = refs;
     // Only process audio for assistant messages with audio
     if (delta?.audio) {
-      player.current.add16BitPCM(delta.audio, item.id);
+      player.current?.add16BitPCM(delta.audio, item.id);
     }
     
     // Still process completed messages for the audio controls
@@ -64,8 +51,8 @@ export default function AiHindiTutor(): JSX.Element {
     
     // Only update items state on completion or when we have audio
     if (delta?.audio || item.status === 'completed') {
-      const items = client.current.conversation.getItems();
-      setItems(items);
+      const items = client.current?.conversation.getItems();
+      setItems(items || []);
     }
   };
 
@@ -75,98 +62,124 @@ export default function AiHindiTutor(): JSX.Element {
 
     if (!isRecording) {
       setSessionState(prev => ({ ...prev, isRecording: true }));
-      await recorder.current.record((data) => client.current.appendInputAudio(data.mono));
+      await recorder.current?.record((data) => client.current?.appendInputAudio(data.mono));
     } else {
       setSessionState(prev => ({ ...prev, isRecording: false }));
-      await recorder.current.pause();
-      client.current.createResponse();
+      await recorder.current?.pause();
+      client.current?.createResponse();
     }
   };
 
   const initializeSession = async () => {
-    const { client, recorder, player } = refs;
-    if (!client.current || !recorder.current) return;
+    const { client, recorder, player, toolAdded } = refs;
+    if (!client.current || !recorder.current) {
+      console.error('Client or recorder not initialized');
+      return;
+    }
   
     try {
       // 1. Initialize audio
       await recorder.current.begin();
       await player.current.connect();
   
-      // 2. Load phrases first
-      const phrases = await apiService.fetchDailyPhrases();
+      // Initialize phraase manager
+      const phrases = await phraseManager.init();
+      
+      // 3. Load system prompt
+      const baseSystemPrompt = await apiService.fetchSystemPrompt();
+      console.log('Loaded system prompt');
+      
       const phrasesContext = `Today's phrases:\n${phrases.map(phrase => 
-        `- ${phrase.hindi} (${phrase.english}) - ${phrase.context}`
+        `[ID: ${phrase.id}] ${phrase.hindi} (${phrase.english}) - ${phrase.context}`
       ).join('\n')}`;
   
-      // 3. Connect to OpenAI and configure with combined prompt
+      // 4. Connect to OpenAI and add tool
       await client.current.connect();
-      const baseSystemPrompt = await apiService.fetchSystemPrompt();
+      
+      if (!toolAdded.current) {
+        console.log('Adding submit_phrase_response tool...');
+          client.current.addTool(
+          {
+            name: 'submit_phrase_response',
+            description: 'Submit feedback about whether a phrase was correctly used/pronounced, and get the next phrase.',
+            parameters: {
+              type: 'object',
+              properties: {
+                wasCorrect: {
+                  type: 'boolean',
+                  description: 'Whether the phrase was correctly used/pronounced'
+                }
+              },
+              required: ['wasCorrect']
+            }
+          },
+          async ({ wasCorrect }) => {
+            const next_phrase = await phraseManager.handleFeedback(wasCorrect);
+            return {
+              "next_phrase": next_phrase,
+            };
+          }
+          );
+          toolAdded.current = true;
+      }
+
+      // 5. Update session with prompts
+      console.log('Updating session with prompts...');
       await client.current.updateSession({
         instructions: `${baseSystemPrompt}\n\n${phrasesContext}`,
         input_audio_transcription: { model: 'whisper-1' }
       });
+      console.log('Session updated with prompts');
   
-      // 4. Update state
-      setSessionState(prev => ({ 
-        ...prev, 
-        currentPhraseIndex: 0,
-        sessionActive: true,
-        isConnected: true 
-      }));
+      // 6. Update state
+      setSessionState(prev => {
+        const newState = { 
+          ...prev,
+          sessionActive: true,
+          isConnected: true 
+        };
+        console.log('Initializing session state:', newState);
+        return newState;
+      });
   
     } catch (error) {
       console.error('Session initialization failed:', error);
-      await cleanup();
       throw error;
     }
   };
 
-  const cleanup = async () => {
-    try {
-      const { client, recorder, player } = refs;
-      
-      if (recorder.current) {
-        await recorder.current.end();
-      }
-      
-      if (client.current) {
-        await client.current.disconnect();
-        client.current.reset();
-      }
+  // Initialize once on mount
+  useEffect(() => {
+    let mounted = true;
 
-      if (player.current?.context) {
-        await player.current.context.close();
+    const init = async () => {
+      refs.client.current = new RealtimeClient({ apiKey: apiService.getApiKey(), dangerouslyAllowAPIKeyInBrowser: true});
+      refs.recorder.current = new WavRecorder({ sampleRate: CONFIG.SAMPLE_RATE });
+      refs.player.current = new WavStreamPlayer({ sampleRate: CONFIG.SAMPLE_RATE });
+      
+      if (mounted) {
+        await initializeSession();
       }
+    };
 
-      setSessionState(prev => ({  
-        ...prev, 
-        isConnected: false,
-        sessionActive: false 
-      }));
-    } catch (error) {
-      console.error('Cleanup failed:', error);
-    }
-  };
+    init();
+    return () => {
+      mounted = false;
+    };
+  }, []); // Empty deps array - only run once
 
   // Initialize session and set up event handlers
   useEffect(() => {
     const client = refs.client.current;
     
     // Set up event handlers
-    client.on('error', console.error);
-    client.on('conversation.updated', handleConversationUpdate);
-
-    // Initialize session
-    initializeSession().catch(error => {
-      console.error('Session initialization error:', error);
-      cleanup();
-    });
+    client?.on('error', console.error);
+    client?.on('conversation.updated', handleConversationUpdate);
 
     // Cleanup function
     return () => {
-      client.off('error', console.error);
-      client.off('conversation.updated', handleConversationUpdate);
-      cleanup();
+      client?.off('error', console.error);
+      client?.off('conversation.updated', handleConversationUpdate);
     };
   }, []); // Empty deps - we want this to run only on mount/unmount
 
@@ -201,20 +214,9 @@ export default function AiHindiTutor(): JSX.Element {
                   item.role === 'assistant' ? 'text-blue-600' : 'text-gray-700'
                 }`}
               >
-                <div className="font-medium mb-1">
-                  {item.role === 'assistant' ? 'Tutor' : 'You'}:
-                </div>
-                <div>
-                  {(item.formatted?.transcript || item.formatted?.text || 
-                   (item.formatted?.audio?.length ? '(awaiting transcript)' : ''))}
-                </div>
-                {item.formatted?.file && (
-                  <audio
-                    src={item.formatted.file.url}
-                    controls
-                    className="mt-2 w-full"
-                  />
-                )}
+                <p>{typeof item.content === 'string' ? item.content : 
+                   item.formatted?.transcript || item.formatted?.text || 
+                   (item.formatted?.audio?.length ? '(awaiting transcript)' : '')}</p>
               </div>
             ))}
           </ScrollArea>
