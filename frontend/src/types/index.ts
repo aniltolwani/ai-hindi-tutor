@@ -6,7 +6,7 @@ export interface ConversationItem {
   formatted: {
     text?: string;
     transcript?: string;
-    audio?: any;
+    audio?: { length?: number } | { data?: ArrayBuffer };
     file?: { url: string; };
   };
 }

@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { RealtimeClient } from '@openai/realtime-api-beta';
-import { WavRecorder, WavStreamPlayer} from '../lib/wavtools/index.js';
+import { WavRecorder, WavStreamPlayer} from '../lib/wavtools';
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Mic } from 'lucide-react'
@@ -30,7 +30,7 @@ export default function AiHindiTutor(): JSX.Element {
   };
 
 
-  const handleConversationUpdate = async ({ item, delta }: any) => {
+  const handleConversationUpdate = async ({ item, delta }: { item: { id: string; status?: string; formatted?: { audio?: any; text?: string; transcript?: string; file?: any } }; delta?: { audio?: Int16Array } }) => {
     const { client, player } = refs;
     // Only process audio for assistant messages with audio
     if (delta?.audio) {
@@ -38,13 +38,15 @@ export default function AiHindiTutor(): JSX.Element {
     }
     
     // Still process completed messages for the audio controls
-    if (item.status === 'completed' && item.formatted.audio?.length) {
+    if (item.status === 'completed' && item.formatted?.audio?.length) {
       const wavFile = await WavRecorder.decode(
         item.formatted.audio,
         CONFIG.SAMPLE_RATE,
         CONFIG.SAMPLE_RATE
       );
-      item.formatted.file = wavFile;
+      if (item.formatted) {
+        item.formatted.file = wavFile;
+      }
     }
     
     // Only update items state on completion or when we have audio
@@ -60,7 +62,7 @@ export default function AiHindiTutor(): JSX.Element {
 
     if (!isRecording) {
       setSessionState((prev: SessionState) => ({ ...prev, isRecording: true }));
-      await recorder.current?.record((data: any) => client.current?.appendInputAudio(data.mono));
+      await recorder.current?.record((data: { mono: Float32Array }) => client.current?.appendInputAudio(data.mono));
     } else {
       setSessionState((prev: SessionState) => ({ ...prev, isRecording: false }));
       await recorder.current?.pause();
@@ -218,9 +220,7 @@ export default function AiHindiTutor(): JSX.Element {
                   item.role === 'assistant' ? 'text-blue-600' : 'text-gray-700'
                 }`}
               >
-                <p>{typeof item.content === 'string' ? item.content : 
-                   item.formatted?.transcript || item.formatted?.text || 
-                   (item.formatted?.audio?.length ? '(awaiting transcript)' : '')}</p>
+                <p>{item.formatted?.transcript || item.formatted?.text || (item.formatted?.audio ? '(awaiting transcript)' : '')}</p>
               </div>
             ))}
           </ScrollArea>
