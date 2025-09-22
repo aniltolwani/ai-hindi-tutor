@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { RealtimeClient } from '@openai/realtime-api-beta';
 import { WavRecorder, WavStreamPlayer} from '../lib/wavtools/index.js';
 import { Button } from "@/components/ui/button"
@@ -32,7 +32,7 @@ export default function AiHindiTutor(): JSX.Element {
   };
 
 
-  const handleConversationUpdate = async ({ item, delta }: any) => {
+  const handleConversationUpdate = useCallback(async ({ item, delta }: any) => {
     const { client, player } = refs;
     // Only process audio for assistant messages with audio
     if (delta?.audio) {
@@ -54,7 +54,7 @@ export default function AiHindiTutor(): JSX.Element {
       const items = client.current?.conversation.getItems();
       setItems(items || []);
     }
-  };
+  }, []);
 
   const handlePushToTalk = async () => {
     const { isRecording } = sessionState;
@@ -89,9 +89,10 @@ export default function AiHindiTutor(): JSX.Element {
       const baseSystemPrompt = await apiService.fetchSystemPrompt();
       console.log('Loaded system prompt');
       
-      const phrasesContext = `Today's phrases:\n${phrases.map(phrase => 
-        `[ID: ${phrase.id}] ${phrase.hindi} (${phrase.english}) - ${phrase.context}`
-      ).join('\n')}`;
+      const phrasesContext = useMemo(() => 
+        `Today's phrases:\n${phrases.map(phrase => 
+          `[ID: ${phrase.id}] ${phrase.hindi} (${phrase.english}) - ${phrase.context}`
+        ).join('\n')}`, [phrases]);
   
       // 4. Connect to OpenAI and add tool
       await client.current.connect();
@@ -181,7 +182,7 @@ export default function AiHindiTutor(): JSX.Element {
       client?.off('error', console.error);
       client?.off('conversation.updated', handleConversationUpdate);
     };
-  }, []); // Empty deps - we want this to run only on mount/unmount
+  }, [handleConversationUpdate]); // Depend on memoized callback
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-400 via-pink-500 to-red-500 flex items-center justify-center p-4">

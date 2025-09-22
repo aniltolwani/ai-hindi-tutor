@@ -1,4 +1,4 @@
-import { WavRecorder, WavStreamPlayer } from '../lib/wavtools';
+import { WavRecorder } from '../lib/wavtools';
 import { WavRenderer } from '@/lib/wavtools/wav_renderer.js';
 
 export const audioService = {
