@@ -38,9 +38,9 @@ export default function AiHindiTutor(): JSX.Element {
     }
     
     // Still process completed messages for the audio controls
-    if (item.status === 'completed' && item.formatted?.audio?.length) {
+    if (item.status === 'completed' && item.formatted?.audio) {
       const wavFile = await WavRecorder.decode(
-        item.formatted.audio,
+        item.formatted.audio as unknown as Float32Array,
         CONFIG.SAMPLE_RATE,
         CONFIG.SAMPLE_RATE
       );
@@ -80,7 +80,9 @@ export default function AiHindiTutor(): JSX.Element {
     try {
       // 1. Initialize audio
       await recorder.current.begin();
-      await player.current.connect();
+      if (player.current) {
+        await player.current.connect();
+      }
   
       // Initialize phraase manager
       const phrases = await phraseManager.init();

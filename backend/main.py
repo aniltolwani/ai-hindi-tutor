@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 import websockets
 import asyncio
 import random
-from db import supabase, IS_SUPABASE_CONFIGURED
+from .db import supabase, IS_SUPABASE_CONFIGURED
 
 load_dotenv()
 
