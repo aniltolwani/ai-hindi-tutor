@@ -7,15 +7,15 @@ export const phraseManager = {
   
     async init() {
       this.phrases = await apiService.fetchDailyPhrases();
-      console.log('Phrases loaded:', this.phrases);
       return this.phrases;
     },
   
     async handleFeedback(wasCorrect: boolean) {
-      const current = this.phrases[this.currentIndex]
-      await apiService.submitPhraseResponse(current.id, wasCorrect)
-      
-      this.currentIndex++
-      return this.phrases[this.currentIndex] // Next phrase or undefined if done
+      const current = this.phrases[this.currentIndex];
+      if (!current) return undefined;
+      const ok = await apiService.submitPhraseResponse(current.id, wasCorrect);
+      if (!ok) return current;
+      this.currentIndex++;
+      return this.phrases[this.currentIndex] || undefined;
     }
   }

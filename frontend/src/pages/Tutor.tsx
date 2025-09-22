@@ -12,16 +12,14 @@ import { ConversationItem, SessionState} from '../types';
 import { phraseManager } from '@/services/phraseManager.js';
 
 export default function AiHindiTutor(): JSX.Element {
-  // Core state
   const [sessionState, setSessionState] = useState<SessionState>({
     isConnected: false,
     isRecording: false,
     sessionActive: false,
   });
-
+  const [initError, setInitError] = useState<string | null>(null);
   const [items, setItems] = useState<ConversationItem[]>([]);
 
-  // Core refs for audio and communication
   const refs = {
     client: useRef<RealtimeClient | null>(null),
     recorder: useRef<WavRecorder | null>(null),
@@ -61,10 +59,10 @@ export default function AiHindiTutor(): JSX.Element {
     const { client, recorder } = refs;
 
     if (!isRecording) {
-      setSessionState(prev => ({ ...prev, isRecording: true }));
-      await recorder.current?.record((data) => client.current?.appendInputAudio(data.mono));
+      setSessionState((prev: SessionState) => ({ ...prev, isRecording: true }));
+      await recorder.current?.record((data: any) => client.current?.appendInputAudio(data.mono));
     } else {
-      setSessionState(prev => ({ ...prev, isRecording: false }));
+      setSessionState((prev: SessionState) => ({ ...prev, isRecording: false }));
       await recorder.current?.pause();
       client.current?.createResponse();
     }
@@ -113,7 +111,7 @@ export default function AiHindiTutor(): JSX.Element {
               required: ['wasCorrect']
             }
           },
-          async ({ wasCorrect }) => {
+          async ({ wasCorrect }: { wasCorrect: boolean }) => {
             const next_phrase = await phraseManager.handleFeedback(wasCorrect);
             return {
               "next_phrase": next_phrase,
@@ -132,7 +130,7 @@ export default function AiHindiTutor(): JSX.Element {
       console.log('Session updated with prompts');
   
       // 6. Update state
-      setSessionState(prev => {
+      setSessionState((prev: SessionState) => {
         const newState = { 
           ...prev,
           sessionActive: true,
@@ -144,7 +142,9 @@ export default function AiHindiTutor(): JSX.Element {
   
     } catch (error) {
       console.error('Session initialization failed:', error);
-      throw error;
+      setInitError('Failed to initialize session.');
+      setSessionState((prev: SessionState) => ({ ...prev, sessionActive: false, isConnected: false }));
+      return;
     }
   };
 
@@ -205,6 +205,10 @@ export default function AiHindiTutor(): JSX.Element {
               className="flex-1 h-full rounded border"
             />
           </div>
+
+          {initError ? (
+            <div className="mb-4 text-sm text-red-600">{initError}</div>
+          ) : null}
 
           <ScrollArea className="h-[300px] border rounded-md p-4 mb-4" data-conversation-content>
             {items.map((item) => (

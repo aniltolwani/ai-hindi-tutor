@@ -1,6 +1,24 @@
 # ai-hindi-tutor
 world's best hindi-tutor using realtime voice API, spaced repetition, and a focus on best language learning principles 1) speaking 2) spaced repetition and 3) learning in context
 
+## Quickstart
+
+- Copy .env.example to .env and fill values.
+- Backend:
+  - python >= 3.10
+  - Install deps: pip install -r requirements.txt or pip install .
+  - Run: uvicorn backend.main:app --reload
+  - Health: GET http://localhost:8000/healthz
+  - Prompt: GET http://localhost:8000/system_prompt
+- Frontend:
+  - cd frontend
+  - npm install
+  - npm run dev
+- Optional relay: cd frontend && npm run relay
+
+CORS_ORIGINS can be configured via env, defaulting to http://localhost:5173,http://localhost:3000.
+
+Supabase schema reference is in backend/db.py.
 
 # AI Language Tutor - Technical Design Specification
 

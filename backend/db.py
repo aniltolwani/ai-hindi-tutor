@@ -7,9 +7,13 @@ load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+if not SUPABASE_URL or not SUPABASE_KEY:
+    supabase = None
+else:
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Schema for reference:
+IS_SUPABASE_CONFIGURED = supabase is not None
+
 """
 create table phrases (
     id serial primary key,
