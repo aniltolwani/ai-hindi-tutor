@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { RealtimeClient } from '@openai/realtime-api-beta';
-import { WavRecorder, WavStreamPlayer} from '../lib/wavtools';
+import { WavRecorder, WavStreamPlayer} from '@/lib/wavtools';
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Mic } from 'lucide-react'
@@ -30,7 +30,7 @@ export default function AiHindiTutor(): JSX.Element {
   };
 
 
-  const handleConversationUpdate = async ({ item, delta }: { item: { id: string; status?: string; formatted?: { audio?: any; text?: string; transcript?: string; file?: any } }; delta?: { audio?: Int16Array } }) => {
+  const handleConversationUpdate = async ({ item, delta }: { item: { id: string; status?: string; formatted?: { audio?: Float32Array[] | Int16Array[] | { length?: number } | { data?: ArrayBuffer }; text?: string; transcript?: string; file?: unknown } }; delta?: { audio?: Int16Array } }) => {
     const { client, player } = refs;
     // Only process audio for assistant messages with audio
     if (delta?.audio) {
